@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Movie } from '@/types/movie'
-import { getMovieCoverGradient, getPosterUrl } from '@/data/movies'
+import { getMovieCoverGradient, getPosterUrl, getBackdropUrl } from '@/data/movies'
 import { useCart } from '@/composables/useCart'
 
 const props = defineProps<{
@@ -14,13 +14,17 @@ const emit = defineEmits<{
 
 const cart = useCart()
 
-// Track if poster failed to load
+// Track if images failed to load
 const posterError = ref(false)
+const backdropError = ref(false)
 
-const posterUrl = computed(() => getPosterUrl(props.movie, 'w500'))
+const posterUrl = computed(() => getPosterUrl(props.movie, 'w342'))
+const backdropUrl = computed(() => getBackdropUrl(props.movie, 'w780'))
 const coverGradient = computed(() => getMovieCoverGradient(props.movie))
 const isInCart = computed(() => cart.isInCart(props.movie.id))
 
+// Show backdrop if URL exists and hasn't errored
+const showBackdrop = computed(() => backdropUrl.value && !backdropError.value)
 // Show poster if URL exists and hasn't errored
 const showPoster = computed(() => posterUrl.value && !posterError.value)
 
@@ -54,6 +58,10 @@ const handlePosterError = () => {
   posterError.value = true
 }
 
+const handleBackdropError = () => {
+  backdropError.value = true
+}
+
 // Format TMDB rating if available
 const tmdbRatingDisplay = computed(() => {
   if (props.movie.tmdbRating) {
@@ -72,14 +80,14 @@ const tmdbRatingDisplay = computed(() => {
           <div class="tv-screen">
             <div class="modal-cover" :style="{ background: coverGradient }">
               <img 
-                v-if="showPoster"
-                :src="posterUrl" 
+                v-if="showBackdrop"
+                :src="backdropUrl" 
                 :alt="movie.title" 
-                class="modal-poster"
-                @error="handlePosterError"
+                class="modal-backdrop"
+                @error="handleBackdropError"
               />
-              <!-- Fallback when no poster -->
-              <div v-else class="modal-poster-fallback">
+              <!-- Fallback when no backdrop - show gradient with title -->
+              <div v-else class="modal-backdrop-fallback">
                 <span class="fallback-title">{{ movie.title }}</span>
                 <span class="fallback-year">{{ movie.year }}</span>
               </div>
@@ -87,26 +95,44 @@ const tmdbRatingDisplay = computed(() => {
           </div>
         </div>
         <div class="modal-info">
-          <h2 class="modal-title">{{ movie.title }}</h2>
-          <div class="modal-meta">
-            <span>{{ movie.year }}</span>
-            <span>•</span>
-            <span>{{ movie.rating || 'NR' }}</span>
-            <span v-if="movie.runtime">•</span>
-            <span v-if="movie.runtime">{{ movie.runtime }}</span>
-            <span v-if="tmdbRatingDisplay">•</span>
-            <span v-if="tmdbRatingDisplay" class="tmdb-rating">{{ tmdbRatingDisplay }}</span>
-          </div>
-          <p v-if="movie.tagline" class="modal-tagline">"{{ movie.tagline }}"</p>
-          <p v-if="movie.overview" class="modal-overview">{{ movie.overview }}</p>
-          <div class="modal-genres">
-            <span 
-              v-for="genre in movie.genre" 
-              :key="genre" 
-              class="modal-genre-tag"
-            >
-              {{ genre }}
-            </span>
+          <div class="modal-info-layout">
+            <!-- Poster on the left -->
+            <div class="modal-poster-container">
+              <img 
+                v-if="showPoster"
+                :src="posterUrl" 
+                :alt="movie.title" 
+                class="modal-poster"
+                @error="handlePosterError"
+              />
+              <div v-else class="modal-poster-fallback">
+                <span class="poster-fallback-title">{{ movie.title }}</span>
+              </div>
+            </div>
+            <!-- Info on the right -->
+            <div class="modal-info-content">
+              <h2 class="modal-title">{{ movie.title }}</h2>
+              <div class="modal-meta">
+                <span>{{ movie.year }}</span>
+                <span>•</span>
+                <span>{{ movie.rating || 'NR' }}</span>
+                <span v-if="movie.runtime">•</span>
+                <span v-if="movie.runtime">{{ movie.runtime }}</span>
+                <span v-if="tmdbRatingDisplay">•</span>
+                <span v-if="tmdbRatingDisplay" class="tmdb-rating">{{ tmdbRatingDisplay }}</span>
+              </div>
+              <p v-if="movie.tagline" class="modal-tagline">"{{ movie.tagline }}"</p>
+              <p v-if="movie.overview" class="modal-overview">{{ movie.overview }}</p>
+              <div class="modal-genres">
+                <span 
+                  v-for="genre in movie.genre" 
+                  :key="genre" 
+                  class="modal-genre-tag"
+                >
+                  {{ genre }}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
         <div class="modal-actions">
@@ -125,7 +151,15 @@ const tmdbRatingDisplay = computed(() => {
 </template>
 
 <style scoped>
-.modal-poster-fallback {
+/* Backdrop image in TV frame */
+.modal-backdrop {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.modal-backdrop-fallback {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -150,17 +184,92 @@ const tmdbRatingDisplay = computed(() => {
   color: rgba(255, 255, 255, 0.8);
 }
 
+/* Layout container for poster + info side by side */
+.modal-info-layout {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+
+/* Poster container on the left */
+.modal-poster-container {
+  flex-shrink: 0;
+  width: 120px;
+  height: 180px;
+  border: 3px solid rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  background: linear-gradient(135deg, #333 0%, #1a1a1a 100%);
+}
+
+.modal-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.modal-poster-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0.5rem;
+  text-align: center;
+}
+
+.poster-fallback-title {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.5rem;
+  color: white;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+  line-height: 1.4;
+}
+
+/* Info content on the right */
+.modal-info-content {
+  flex: 1;
+  min-width: 0;
+}
+
 .modal-overview {
   font-family: 'VT323', monospace;
   font-size: 1.1rem;
   color: rgba(15, 14, 14, 0.8);
   line-height: 1.4;
   margin: 0.5rem 0 1rem;
-  max-height: 100px;
+  max-height: 80px;
   overflow-y: auto;
 }
 
 .tmdb-rating {
   color: var(--sunset-orange, #ff5100);
+}
+
+/* Mobile: stack poster above text */
+@media (max-width: 480px) {
+  .modal-info-layout {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .modal-poster-container {
+    width: 100px;
+    height: 150px;
+    margin-bottom: 0.5rem;
+  }
+
+  .modal-info-content {
+    width: 100%;
+    text-align: center;
+  }
+
+  .modal-info-content .modal-meta {
+    justify-content: center;
+  }
+
+  .modal-info-content .modal-genres {
+    justify-content: center;
+  }
 }
 </style>

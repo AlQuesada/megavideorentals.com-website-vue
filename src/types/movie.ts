@@ -9,6 +9,7 @@ export interface Movie {
   runtime: string;
   available: boolean;
   poster: string;        // TMDB poster path (e.g., /abc123.jpg)
+  backdrop?: string;     // TMDB backdrop path (e.g., /xyz789.jpg)
   tmdbRating?: number;   // TMDB score (1-10)
   overview?: string;     // Movie description
 }

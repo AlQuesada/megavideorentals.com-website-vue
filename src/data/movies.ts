@@ -48,3 +48,11 @@ export function getPosterUrl(movie: Movie, size: 'w185' | 'w342' | 'w500' | 'ori
   }
   return `${TMDB_IMAGE_BASE}/${size}${movie.poster}`;
 }
+
+// Get backdrop URL from TMDB path
+export function getBackdropUrl(movie: Movie, size: 'w300' | 'w780' | 'w1280' | 'original' = 'w780'): string {
+  if (!movie.backdrop) {
+    return ''; // Return empty, component should handle fallback with gradient
+  }
+  return `${TMDB_IMAGE_BASE}/${size}${movie.backdrop}`;
+}

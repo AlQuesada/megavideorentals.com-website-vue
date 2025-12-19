@@ -404,6 +404,7 @@ export function transformTMDBMovie(
     runtime,
     available: Math.random() > 0.1, // 90% available (simulated)
     poster: tmdbMovie.poster_path || '',
+    backdrop: tmdbMovie.backdrop_path || '',
     tmdbRating: tmdbMovie.vote_average,
     overview: tmdbMovie.overview,
   };
