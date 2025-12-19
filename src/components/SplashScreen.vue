@@ -12,7 +12,7 @@ defineEmits<{
         MEGA VIDEO
         <span class="splash-accent">▓▒░</span>
       </div>
-      <div class="splash-tagline">YOUR AWESOME VIDEO RENTAL STORE</div>
+      <div class="splash-tagline">YOUR AWESOME 80s VIDEO RENTAL STORE</div>
       <div class="splash-vhs">📼</div>
       <button class="splash-start" @click.stop="$emit('dismiss')">
         <span class="splash-blink">▶ PRESS START ◀</span>
