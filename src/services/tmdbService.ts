@@ -4,7 +4,9 @@ import type {
   TMDBMovie,
   TMDBMovieDetails,
   TMDBMovieResponse,
-  TMDBReleaseDatesResponse,
+  TMDBMovieDetailsWithReleaseDates,
+  CacheEntry,
+  CachedMovieDetails,
 } from '@/types/movie';
 
 const API_KEY = config.tmdb.apiKey;
@@ -27,10 +29,84 @@ export const IMAGE_SIZES = {
   },
 } as const;
 
-// Rate limiting: TMDB allows 40 requests per 10 seconds
+// =============================================================================
+// CACHING LAYER - localStorage with 24h TTL
+// =============================================================================
+
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+const CACHE_PREFIX = 'tmdb_cache_';
+
+// In-memory cache for current session (faster than localStorage lookups)
+const memoryCache = new Map<string, CacheEntry<unknown>>();
+
+function getCacheKey(type: string, id: string | number): string {
+  return `${CACHE_PREFIX}${type}_${id}`;
+}
+
+function getFromCache<T>(key: string): T | null {
+  // Check memory cache first
+  const memCached = memoryCache.get(key);
+  if (memCached && Date.now() - memCached.timestamp < CACHE_TTL) {
+    return memCached.data as T;
+  }
+
+  // Fall back to localStorage
+  try {
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      const entry: CacheEntry<T> = JSON.parse(cached);
+      if (Date.now() - entry.timestamp < CACHE_TTL) {
+        // Populate memory cache
+        memoryCache.set(key, entry);
+        return entry.data;
+      }
+      // Expired, remove from localStorage
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // localStorage not available or parse error
+  }
+  return null;
+}
+
+function saveToCache<T>(key: string, data: T): void {
+  const entry: CacheEntry<T> = { data, timestamp: Date.now() };
+  
+  // Always save to memory cache
+  memoryCache.set(key, entry as CacheEntry<unknown>);
+  
+  // Try to save to localStorage
+  try {
+    localStorage.setItem(key, JSON.stringify(entry));
+  } catch {
+    // localStorage full or not available - memory cache still works
+  }
+}
+
+/**
+ * Clear all TMDB caches
+ */
+export function clearCache(): void {
+  memoryCache.clear();
+  try {
+    const keys = Object.keys(localStorage).filter(k => k.startsWith(CACHE_PREFIX));
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch {
+    // localStorage not available
+  }
+}
+
+// =============================================================================
+// RATE LIMITING - Optimized with parallel batching
+// =============================================================================
+
+const REQUEST_DELAY = 100; // Reduced from 250ms - 10 requests/second
+const BATCH_SIZE = 5; // Process 5 concurrent requests per batch
+const BATCH_DELAY = 300; // Delay between batches
+
+// Simple queue for individual requests
 const REQUEST_QUEUE: Array<() => Promise<void>> = [];
 let isProcessingQueue = false;
-const REQUEST_DELAY = 250; // 250ms between requests = 4 requests/second (safe margin)
 
 async function processQueue(): Promise<void> {
   if (isProcessingQueue || REQUEST_QUEUE.length === 0) return;
@@ -61,6 +137,48 @@ function queueRequest<T>(requestFn: () => Promise<T>): Promise<T> {
     processQueue();
   });
 }
+
+/**
+ * Batch fetch helper - processes items in parallel batches
+ */
+export async function batchFetch<TItem, TResult>(
+  items: TItem[],
+  fetchFn: (item: TItem) => Promise<TResult>,
+  batchSize: number = BATCH_SIZE
+): Promise<Map<TItem, TResult>> {
+  const results = new Map<TItem, TResult>();
+  
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(async (item) => {
+        try {
+          const result = await fetchFn(item);
+          return [item, result] as const;
+        } catch {
+          return null;
+        }
+      })
+    );
+    
+    batchResults.forEach(result => {
+      if (result) {
+        results.set(result[0], result[1]);
+      }
+    });
+    
+    // Small delay between batches to avoid rate limiting
+    if (i + batchSize < items.length) {
+      await new Promise(r => setTimeout(r, BATCH_DELAY));
+    }
+  }
+  
+  return results;
+}
+
+// =============================================================================
+// CORE API FUNCTIONS
+// =============================================================================
 
 // Generic fetch wrapper with error handling
 async function fetchTMDB<T>(endpoint: string, params: Record<string, string> = {}): Promise<T> {
@@ -157,53 +275,95 @@ export async function searchMovies(
 }
 
 /**
- * Get movie details including tagline and runtime
+ * Extract US certification from release dates response
  */
-export async function getMovieDetails(movieId: number): Promise<TMDBMovieDetails> {
-  return fetchTMDBQueued<TMDBMovieDetails>(`/movie/${movieId}`, {
-    language: 'en-US',
+function extractUSCertification(releaseDates?: { results: Array<{ iso_3166_1: string; release_dates: Array<{ certification: string }> }> }): string {
+  if (!releaseDates?.results) return 'NR';
+  
+  const usRelease = releaseDates.results.find(r => r.iso_3166_1 === 'US');
+  if (usRelease && usRelease.release_dates.length > 0) {
+    const certification = usRelease.release_dates.find(rd => rd.certification)?.certification;
+    if (certification) {
+      return certification;
+    }
+  }
+  
+  return 'NR';
+}
+
+/**
+ * Get movie details with certification using append_to_response (single API call)
+ * This combines what was previously 2 separate API calls into 1
+ */
+export async function getMovieDetailsWithCertification(movieId: number): Promise<CachedMovieDetails> {
+  const cacheKey = getCacheKey('movie_details', movieId);
+  
+  // Check cache first
+  const cached = getFromCache<CachedMovieDetails>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+  
+  // Fetch with append_to_response to get both details and release_dates in one call
+  const response = await fetchTMDBQueued<TMDBMovieDetailsWithReleaseDates>(
+    `/movie/${movieId}`,
+    {
+      append_to_response: 'release_dates',
+      language: 'en-US',
+    }
+  );
+  
+  const certification = extractUSCertification(response.release_dates);
+  
+  // Remove release_dates from details to match TMDBMovieDetails type
+  const { release_dates: _, ...details } = response;
+  
+  const result: CachedMovieDetails = {
+    details: details as TMDBMovieDetails,
+    certification,
+  };
+  
+  // Save to cache
+  saveToCache(cacheKey, result);
+  
+  return result;
+}
+
+/**
+ * Prefetch movie details (fire and forget, for hover states)
+ */
+export function prefetchMovieDetails(movieId: number): void {
+  const cacheKey = getCacheKey('movie_details', movieId);
+  
+  // Skip if already cached
+  if (getFromCache<CachedMovieDetails>(cacheKey)) {
+    return;
+  }
+  
+  // Fire and forget - don't await
+  getMovieDetailsWithCertification(movieId).catch(() => {
+    // Silently ignore prefetch errors
   });
 }
 
 /**
- * Get US certification for a movie
+ * Get movie details including tagline and runtime (legacy - now uses combined fetch)
+ */
+export async function getMovieDetails(movieId: number): Promise<TMDBMovieDetails> {
+  const { details } = await getMovieDetailsWithCertification(movieId);
+  return details;
+}
+
+/**
+ * Get US certification for a movie (legacy - now uses combined fetch)
  */
 export async function getMovieCertification(movieId: number): Promise<string> {
   try {
-    const response = await fetchTMDBQueued<TMDBReleaseDatesResponse>(
-      `/movie/${movieId}/release_dates`
-    );
-    
-    // Find US release
-    const usRelease = response.results.find(r => r.iso_3166_1 === 'US');
-    if (usRelease && usRelease.release_dates.length > 0) {
-      // Get the first certification that's not empty
-      const certification = usRelease.release_dates.find(rd => rd.certification)?.certification;
-      if (certification) {
-        return certification;
-      }
-    }
-    
-    return 'NR'; // Not Rated if no US certification found
+    const { certification } = await getMovieDetailsWithCertification(movieId);
+    return certification;
   } catch {
     return 'NR';
   }
-}
-
-/**
- * Batch fetch certifications for multiple movies
- */
-export async function batchGetCertifications(movieIds: number[]): Promise<Map<number, string>> {
-  const certifications = new Map<number, string>();
-  
-  // Process in parallel but with rate limiting via queue
-  const promises = movieIds.map(async (id) => {
-    const cert = await getMovieCertification(id);
-    certifications.set(id, cert);
-  });
-  
-  await Promise.all(promises);
-  return certifications;
 }
 
 /**
@@ -250,99 +410,194 @@ export function transformTMDBMovie(
 }
 
 /**
- * Fetch and transform movies with all details
+ * Fetch movies with BASIC info only (fast initial load - no extra API calls)
+ * Details are loaded lazily when modal opens
  */
-export async function fetchMoviesWithDetails(
+export async function fetchMoviesBasic(
   page: number = 1,
   genreId?: number,
   genreMap: Record<number, string> = {}
 ): Promise<{ movies: Movie[]; totalPages: number; totalResults: number }> {
-  // Get discover results
+  // Check page cache first
+  const cacheKey = getCacheKey('discover_page', `${page}_${genreId || 'all'}`);
+  const cached = getFromCache<{ movies: Movie[]; totalPages: number; totalResults: number }>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  // Get discover results - only 1 API call!
   const response = await discoverMovies(page, genreId);
   
   if (response.results.length === 0) {
     return { movies: [], totalPages: 0, totalResults: 0 };
   }
 
-  // Batch fetch certifications
-  const movieIds = response.results.map(m => m.id);
-  const certifications = await batchGetCertifications(movieIds);
-
-  // Fetch details for taglines and runtimes (in parallel with rate limiting)
-  const detailsPromises = response.results.map(movie => 
-    getMovieDetails(movie.id).catch(() => undefined)
-  );
-  const detailsResults = await Promise.all(detailsPromises);
-  const detailsMap = new Map<number, TMDBMovieDetails>();
-  detailsResults.forEach((details, index) => {
-    const movie = response.results[index];
-    if (details && movie) {
-      detailsMap.set(movie.id, details);
-    }
-  });
-
-  // Transform to application format
+  // Transform to application format WITHOUT details (fast)
   const movies = response.results.map(tmdbMovie => 
-    transformTMDBMovie(
-      tmdbMovie,
-      genreMap,
-      certifications.get(tmdbMovie.id) || 'NR',
-      detailsMap.get(tmdbMovie.id)
-    )
+    transformTMDBMovie(tmdbMovie, genreMap)
   );
 
-  return {
+  const result = {
     movies,
     totalPages: response.total_pages,
     totalResults: response.total_results,
   };
+
+  // Cache the results
+  saveToCache(cacheKey, result);
+
+  return result;
 }
 
 /**
- * Search and transform movies with details
+ * Search movies with BASIC info only (fast initial load)
  */
-export async function searchMoviesWithDetails(
+export async function searchMoviesBasic(
   query: string,
   page: number = 1,
   genreMap: Record<number, string> = {}
 ): Promise<{ movies: Movie[]; totalPages: number; totalResults: number }> {
+  // Check cache first
+  const cacheKey = getCacheKey('search_page', `${query}_${page}`);
+  const cached = getFromCache<{ movies: Movie[]; totalPages: number; totalResults: number }>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const response = await searchMovies(query, page);
   
   if (response.results.length === 0) {
     return { movies: [], totalPages: 0, totalResults: 0 };
   }
 
-  // Batch fetch certifications
-  const movieIds = response.results.map(m => m.id);
-  const certifications = await batchGetCertifications(movieIds);
-
-  // Fetch details for taglines and runtimes
-  const detailsPromises = response.results.map(movie => 
-    getMovieDetails(movie.id).catch(() => undefined)
-  );
-  const detailsResults = await Promise.all(detailsPromises);
-  const detailsMap = new Map<number, TMDBMovieDetails>();
-  detailsResults.forEach((details, index) => {
-    const movie = response.results[index];
-    if (details && movie) {
-      detailsMap.set(movie.id, details);
-    }
-  });
-
-  // Transform to application format
+  // Transform without details (fast)
   const movies = response.results.map(tmdbMovie => 
-    transformTMDBMovie(
-      tmdbMovie,
-      genreMap,
-      certifications.get(tmdbMovie.id) || 'NR',
-      detailsMap.get(tmdbMovie.id)
-    )
+    transformTMDBMovie(tmdbMovie, genreMap)
+  );
+
+  const result = {
+    movies,
+    totalPages: response.total_pages,
+    totalResults: response.total_results,
+  };
+
+  // Cache results
+  saveToCache(cacheKey, result);
+
+  return result;
+}
+
+/**
+ * Enrich a single movie with full details (called on modal open)
+ */
+export async function enrichMovieWithDetails(
+  movie: Movie,
+  genreMap: Record<number, string> = {}
+): Promise<Movie> {
+  try {
+    const { details, certification } = await getMovieDetailsWithCertification(movie.id);
+    
+    return {
+      ...movie,
+      tagline: details.tagline || movie.tagline,
+      runtime: details.runtime ? `${details.runtime} min` : movie.runtime,
+      rating: certification,
+      genre: details.genres?.length > 0 
+        ? details.genres.map(g => g.name) 
+        : movie.genre,
+    };
+  } catch {
+    return movie; // Return original if fetch fails
+  }
+}
+
+/**
+ * Prefetch next page of results (fire and forget)
+ */
+export function prefetchNextPage(
+  currentPage: number,
+  totalPages: number,
+  genreId?: number,
+  searchQuery?: string,
+  genreMap: Record<number, string> = {}
+): void {
+  if (currentPage >= totalPages) return;
+  
+  const nextPage = currentPage + 1;
+  
+  // Fire and forget
+  if (searchQuery) {
+    searchMoviesBasic(searchQuery, nextPage, genreMap).catch(() => {});
+  } else {
+    fetchMoviesBasic(nextPage, genreId, genreMap).catch(() => {});
+  }
+}
+
+/**
+ * Fetch and transform movies with all details (legacy - kept for compatibility)
+ * NOTE: For better performance, use fetchMoviesBasic + enrichMovieWithDetails
+ */
+export async function fetchMoviesWithDetails(
+  page: number = 1,
+  genreId?: number,
+  genreMap: Record<number, string> = {}
+): Promise<{ movies: Movie[]; totalPages: number; totalResults: number }> {
+  // Get basic movies first
+  const result = await fetchMoviesBasic(page, genreId, genreMap);
+  
+  if (result.movies.length === 0) {
+    return result;
+  }
+
+  // Batch fetch details using optimized combined endpoint
+  const enrichedMovies = await batchFetch(
+    result.movies,
+    async (movie) => enrichMovieWithDetails(movie, genreMap)
+  );
+
+  // Replace with enriched versions
+  const movies = result.movies.map(movie => 
+    enrichedMovies.get(movie) || movie
   );
 
   return {
     movies,
-    totalPages: response.total_pages,
-    totalResults: response.total_results,
+    totalPages: result.totalPages,
+    totalResults: result.totalResults,
+  };
+}
+
+/**
+ * Search and transform movies with details (legacy - kept for compatibility)
+ * NOTE: For better performance, use searchMoviesBasic + enrichMovieWithDetails
+ */
+export async function searchMoviesWithDetails(
+  query: string,
+  page: number = 1,
+  genreMap: Record<number, string> = {}
+): Promise<{ movies: Movie[]; totalPages: number; totalResults: number }> {
+  // Get basic movies first
+  const result = await searchMoviesBasic(query, page, genreMap);
+  
+  if (result.movies.length === 0) {
+    return result;
+  }
+
+  // Batch fetch details using optimized combined endpoint
+  const enrichedMovies = await batchFetch(
+    result.movies,
+    async (movie) => enrichMovieWithDetails(movie, genreMap)
+  );
+
+  // Replace with enriched versions
+  const movies = result.movies.map(movie => 
+    enrichedMovies.get(movie) || movie
+  );
+
+  return {
+    movies,
+    totalPages: result.totalPages,
+    totalResults: result.totalResults,
   };
 }
 

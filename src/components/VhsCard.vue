@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { Movie } from '@/types/movie'
 import { getMovieCoverGradient, getPosterUrl } from '@/data/movies'
 import { useCart } from '@/composables/useCart'
+import { useMoviesStore } from '@/composables/useMovies'
 
 const props = defineProps<{
   movie: Movie
@@ -13,6 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const cart = useCart()
+const moviesStore = useMoviesStore()
 
 // Track if poster failed to load
 const posterError = ref(false)
@@ -48,10 +50,15 @@ const handleCartClick = (e: Event) => {
 const handlePosterError = () => {
   posterError.value = true
 }
+
+// Prefetch movie details on hover for instant modal opening
+const handleMouseEnter = () => {
+  moviesStore.onMovieHover(props.movie.id)
+}
 </script>
 
 <template>
-  <div class="vhs-card" @click="emit('select', movie)">
+  <div class="vhs-card" @click="emit('select', movie)" @mouseenter="handleMouseEnter">
     <div class="vhs-tape">
       <div class="vhs-spine"></div>
       <span 
@@ -83,10 +90,6 @@ const handlePosterError = () => {
       >
         {{ buttonText }}
       </button>
-      <div class="vhs-bottom">
-        <span class="vhs-rating">{{ movie.rating || 'NR' }}</span>
-        <span class="vhs-runtime">{{ movie.runtime || '-- min' }}</span>
-      </div>
     </div>
   </div>
 </template>

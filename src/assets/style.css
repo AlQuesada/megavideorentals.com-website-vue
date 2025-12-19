@@ -381,7 +381,7 @@ body::after {
 
 /* VHS Label/Cover */
 .vhs-cover {
-  height: 240px;
+  aspect-ratio: 2 / 3;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1180,7 +1180,7 @@ body::after {
   }
   
   .vhs-cover {
-    height: 180px;
+    aspect-ratio: 2 / 3;
   }
   
   .vhs-title {
@@ -1628,7 +1628,7 @@ body::after {
   }
   
   .vhs-cover {
-    height: 160px;
+    aspect-ratio: 2 / 3;
   }
   
   .vhs-title {

@@ -77,6 +77,23 @@ export interface TMDBReleaseDatesResponse {
   results: TMDBReleaseDateResult[];
 }
 
+// Combined response type when using append_to_response
+export interface TMDBMovieDetailsWithReleaseDates extends TMDBMovieDetails {
+  release_dates: TMDBReleaseDatesResponse;
+}
+
+// Cache entry type for localStorage persistence
+export interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+// Cached movie details with certification
+export interface CachedMovieDetails {
+  details: TMDBMovieDetails;
+  certification: string;
+}
+
 // TMDB Genre ID to Name mapping
 export const TMDB_GENRE_MAP: Record<number, string> = {
   28: 'Action',

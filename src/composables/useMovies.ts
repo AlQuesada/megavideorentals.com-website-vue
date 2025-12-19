@@ -2,12 +2,13 @@ import { ref, computed } from 'vue';
 import type { Movie } from '@/types/movie';
 import { TMDB_GENRE_MAP, GENRE_TO_TMDB_ID } from '@/types/movie';
 import {
-  fetchMoviesWithDetails,
-  searchMoviesWithDetails,
+  fetchMoviesBasic,
+  searchMoviesBasic,
+  enrichMovieWithDetails,
+  prefetchNextPage,
+  prefetchMovieDetails,
+  clearCache as clearTMDBCache,
 } from '@/services/tmdbService';
-
-// Cache for fetched movies by page and genre
-const movieCache = new Map<string, Movie[]>();
 
 // Debounce helper
 function debounce<T extends (...args: Parameters<T>) => void>(
@@ -26,6 +27,7 @@ export function useMovies() {
   const movies = ref<Movie[]>([]);
   const loading = ref(false);
   const loadingMore = ref(false);
+  const loadingDetails = ref(false);
   const error = ref<string | null>(null);
   const currentPage = ref(1);
   const totalPages = ref(0);
@@ -46,26 +48,17 @@ export function useMovies() {
     return movies.value;
   });
 
-  // Generate cache key
-  function getCacheKey(page: number, genre: string, query: string): string {
-    return `${page}-${genre}-${query}`;
-  }
-
-  // Fetch movies (discover or search)
-  async function fetchMovies(page: number = 1, append: boolean = false): Promise<void> {
-    const isSearch = searchQuery.value.trim().length > 0;
-    const genreId = currentGenre.value !== 'All' 
+  // Get current genre ID
+  function getCurrentGenreId(): number | undefined {
+    return currentGenre.value !== 'All' 
       ? GENRE_TO_TMDB_ID[currentGenre.value] 
       : undefined;
+  }
 
-    // Check cache
-    const cacheKey = getCacheKey(page, currentGenre.value, searchQuery.value);
-    const cached = movieCache.get(cacheKey);
-    
-    if (cached && !append) {
-      movies.value = cached;
-      return;
-    }
+  // Fetch movies with BASIC info (fast - single API call)
+  async function fetchMovies(page: number = 1, append: boolean = false): Promise<void> {
+    const isSearch = searchQuery.value.trim().length > 0;
+    const genreId = getCurrentGenreId();
 
     // Set loading state
     if (append) {
@@ -79,13 +72,13 @@ export function useMovies() {
       let result;
       
       if (isSearch) {
-        result = await searchMoviesWithDetails(
+        result = await searchMoviesBasic(
           searchQuery.value,
           page,
           TMDB_GENRE_MAP
         );
       } else {
-        result = await fetchMoviesWithDetails(
+        result = await fetchMoviesBasic(
           page,
           genreId,
           TMDB_GENRE_MAP
@@ -103,8 +96,16 @@ export function useMovies() {
       totalResults.value = result.totalResults;
       currentPage.value = page;
 
-      // Cache results
-      movieCache.set(cacheKey, append ? movies.value : result.movies);
+      // Prefetch next page in background for instant pagination
+      if (result.totalPages > page) {
+        prefetchNextPage(
+          page,
+          result.totalPages,
+          genreId,
+          isSearch ? searchQuery.value : undefined,
+          TMDB_GENRE_MAP
+        );
+      }
       
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to fetch movies';
@@ -151,9 +152,59 @@ export function useMovies() {
     resetAndFetch();
   }
 
-  // Clear cache (useful for forcing refresh)
+  // ==========================================================================
+  // LAZY LOADING: Get full movie details on demand (e.g., when modal opens)
+  // ==========================================================================
+
+  /**
+   * Get enriched movie with full details (tagline, runtime, certification)
+   * Called when user opens a movie modal
+   */
+  async function getMovieWithDetails(movieId: number): Promise<Movie | null> {
+    const movie = movies.value.find(m => m.id === movieId);
+    if (!movie) return null;
+
+    // If already has details (runtime is set), return immediately
+    if (movie.runtime && movie.runtime !== '') {
+      return movie;
+    }
+
+    loadingDetails.value = true;
+    try {
+      const enrichedMovie = await enrichMovieWithDetails(movie, TMDB_GENRE_MAP);
+      
+      // Update the movie in our list
+      const index = movies.value.findIndex(m => m.id === movieId);
+      if (index !== -1) {
+        movies.value[index] = enrichedMovie;
+      }
+      
+      return enrichedMovie;
+    } catch (err) {
+      console.error('Error fetching movie details:', err);
+      return movie; // Return basic movie on error
+    } finally {
+      loadingDetails.value = false;
+    }
+  }
+
+  /**
+   * Prefetch movie details on hover (fire and forget)
+   * Makes modal open feel instant
+   */
+  function onMovieHover(movieId: number): void {
+    prefetchMovieDetails(movieId);
+  }
+
+  // ==========================================================================
+  // CACHE MANAGEMENT
+  // ==========================================================================
+
+  /**
+   * Clear all caches (composable + service layer)
+   */
   function clearCache(): void {
-    movieCache.clear();
+    clearTMDBCache();
   }
 
   // Initialize - fetch first page
@@ -167,6 +218,7 @@ export function useMovies() {
     allMovies: movies,
     loading,
     loadingMore,
+    loadingDetails,
     error,
     currentPage,
     totalPages,
@@ -183,6 +235,10 @@ export function useMovies() {
     clearSearch,
     clearCache,
     refresh: resetAndFetch,
+    
+    // Lazy loading actions
+    getMovieWithDetails,
+    onMovieHover,
   };
 }
 
@@ -195,4 +251,3 @@ export function useMoviesStore() {
   }
   return moviesInstance;
 }
-

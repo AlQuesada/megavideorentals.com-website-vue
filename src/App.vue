@@ -35,10 +35,18 @@ const dismissSplash = () => {
   moviesStore.init()
 }
 
-const openMovie = (movie: Movie) => {
+const openMovie = async (movie: Movie) => {
+  // Set the movie immediately (shows basic info right away)
   selectedMovie.value = movie
   audio.pause()
   document.body.style.overflow = 'hidden'
+  
+  // Fetch full details in background (lazy loading)
+  const enrichedMovie = await moviesStore.getMovieWithDetails(movie.id)
+  if (enrichedMovie && selectedMovie.value?.id === movie.id) {
+    // Update with enriched details if modal is still showing this movie
+    selectedMovie.value = enrichedMovie
+  }
 }
 
 const closeModal = () => {
