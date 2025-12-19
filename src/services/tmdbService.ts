@@ -491,8 +491,7 @@ export async function searchMoviesBasic(
  * Enrich a single movie with full details (called on modal open)
  */
 export async function enrichMovieWithDetails(
-  movie: Movie,
-  genreMap: Record<number, string> = {}
+  movie: Movie
 ): Promise<Movie> {
   try {
     const { details, certification } = await getMovieDetailsWithCertification(movie.id);
@@ -552,7 +551,7 @@ export async function fetchMoviesWithDetails(
   // Batch fetch details using optimized combined endpoint
   const enrichedMovies = await batchFetch(
     result.movies,
-    async (movie) => enrichMovieWithDetails(movie, genreMap)
+    async (movie) => enrichMovieWithDetails(movie)
   );
 
   // Replace with enriched versions
@@ -586,7 +585,7 @@ export async function searchMoviesWithDetails(
   // Batch fetch details using optimized combined endpoint
   const enrichedMovies = await batchFetch(
     result.movies,
-    async (movie) => enrichMovieWithDetails(movie, genreMap)
+    async (movie) => enrichMovieWithDetails(movie)
   );
 
   // Replace with enriched versions

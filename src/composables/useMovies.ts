@@ -171,7 +171,7 @@ export function useMovies() {
 
     loadingDetails.value = true;
     try {
-      const enrichedMovie = await enrichMovieWithDetails(movie, TMDB_GENRE_MAP);
+      const enrichedMovie = await enrichMovieWithDetails(movie);
       
       // Update the movie in our list
       const index = movies.value.findIndex(m => m.id === movieId);
