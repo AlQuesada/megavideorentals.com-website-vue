@@ -14,6 +14,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'selectMovie', movie: Movie): void
   (e: 'loadMore'): void
+  (e: 'addToCartRequest', movie: Movie): void
 }>()
 
 // Infinite scroll with Intersection Observer
@@ -87,6 +88,7 @@ const handleLoadMore = () => {
             :key="movie.id" 
             :movie="movie"
             @select="emit('selectMovie', $event)"
+            @add-to-cart-request="emit('addToCartRequest', $event)"
           />
         </template>
         <div v-else class="no-movies">

@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select', movie: Movie): void
+  (e: 'add-to-cart-request', movie: Movie): void
 }>()
 
 const cart = useCart()
@@ -43,9 +44,11 @@ const handleCartClick = (e: Event) => {
   if (!props.movie.available) return
   
   if (isInCart.value) {
+    // Remove directly if already in cart
     cart.remove(props.movie.id)
   } else {
-    cart.add(props.movie)
+    // Emit request to add - parent will show review modal
+    emit('add-to-cart-request', props.movie)
   }
 }
 
