@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Movie } from '@/types/movie'
-import { getMovieCoverGradient, getPosterUrl } from '@/data/movies'
+import { getMovieCoverGradient, getPosterUrl, getPosterSrcSet, getBackdropUrl } from '@/data/movies'
 import { useCart } from '@/composables/useCart'
 import { useMoviesStore } from '@/composables/useMovies'
 
@@ -16,10 +16,12 @@ const emit = defineEmits<{
 const cart = useCart()
 const moviesStore = useMoviesStore()
 
-// Track if poster failed to load
+// Track if poster failed to load and loaded state for fade-in
 const posterError = ref(false)
+const posterLoaded = ref(false)
 
 const posterUrl = computed(() => getPosterUrl(props.movie, 'w342'))
+const posterSrcSet = computed(() => getPosterSrcSet(props.movie))
 const coverGradient = computed(() => getMovieCoverGradient(props.movie))
 const isInCart = computed(() => cart.isInCart(props.movie.id))
 
@@ -51,9 +53,21 @@ const handlePosterError = () => {
   posterError.value = true
 }
 
-// Prefetch movie details on hover for instant modal opening
+const handlePosterLoad = () => {
+  posterLoaded.value = true
+}
+
+// Prefetch movie details and preload modal images on hover
 const handleMouseEnter = () => {
   moviesStore.onMovieHover(props.movie.id)
+  // Preload modal images for instant modal opening
+  const preload = (src: string) => {
+    if (!src) return
+    const img = new Image()
+    img.src = src
+  }
+  preload(getBackdropUrl(props.movie, 'w780'))
+  preload(getPosterUrl(props.movie, 'w342'))
 }
 </script>
 
@@ -70,10 +84,17 @@ const handleMouseEnter = () => {
       <div class="vhs-cover" :style="{ background: coverGradient }">
         <img 
           v-if="showPoster"
-          :src="posterUrl" 
+          :src="posterUrl"
+          :srcset="posterSrcSet"
+          sizes="(max-width: 480px) 185px, 342px"
           :alt="movie.title" 
           class="vhs-poster"
+          :class="{ 'loaded': posterLoaded }"
           loading="lazy"
+          decoding="async"
+          width="342"
+          height="513"
+          @load="handlePosterLoad"
           @error="handlePosterError"
         />
         <div class="vhs-cover-overlay" :class="{ 'no-poster': !showPoster }">
@@ -99,5 +120,15 @@ const handleMouseEnter = () => {
 .vhs-cover-overlay.no-poster {
   opacity: 1;
   background: transparent;
+}
+
+/* Fade-in transition for poster images */
+.vhs-poster {
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.vhs-poster.loaded {
+  opacity: 1;
 }
 </style>

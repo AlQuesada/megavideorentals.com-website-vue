@@ -33,9 +33,13 @@ const emit = defineEmits<{
             :style="{ background: getMovieCoverGradient(movie) }"
           >
             <img 
-              :src="getPosterUrl(movie)" 
+              :src="getPosterUrl(movie, 'w185')" 
               :alt="movie.title" 
-              class="cart-item-poster" 
+              class="cart-item-poster"
+              loading="lazy"
+              decoding="async"
+              width="185"
+              height="278"
             />
           </div>
           <div class="cart-item-info">

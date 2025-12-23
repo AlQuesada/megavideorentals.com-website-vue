@@ -56,3 +56,15 @@ export function getBackdropUrl(movie: Movie, size: 'w300' | 'w780' | 'w1280' | '
   }
   return `${TMDB_IMAGE_BASE}/${size}${movie.backdrop}`;
 }
+
+// Get poster srcset for responsive images
+export function getPosterSrcSet(movie: Movie): string {
+  if (!movie.poster) return '';
+  return `${TMDB_IMAGE_BASE}/w185${movie.poster} 185w, ${TMDB_IMAGE_BASE}/w342${movie.poster} 342w, ${TMDB_IMAGE_BASE}/w500${movie.poster} 500w`;
+}
+
+// Get backdrop srcset for responsive images
+export function getBackdropSrcSet(movie: Movie): string {
+  if (!movie.backdrop) return '';
+  return `${TMDB_IMAGE_BASE}/w300${movie.backdrop} 300w, ${TMDB_IMAGE_BASE}/w780${movie.backdrop} 780w, ${TMDB_IMAGE_BASE}/w1280${movie.backdrop} 1280w`;
+}

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Movie } from '@/types/movie'
-import { getMovieCoverGradient, getPosterUrl, getBackdropUrl } from '@/data/movies'
+import { getMovieCoverGradient, getPosterUrl, getBackdropUrl, getPosterSrcSet, getBackdropSrcSet } from '@/data/movies'
 import { useCart } from '@/composables/useCart'
 
 const props = defineProps<{
@@ -14,12 +14,16 @@ const emit = defineEmits<{
 
 const cart = useCart()
 
-// Track if images failed to load
+// Track if images failed to load and loaded state for fade-in
 const posterError = ref(false)
 const backdropError = ref(false)
+const posterLoaded = ref(false)
+const backdropLoaded = ref(false)
 
 const posterUrl = computed(() => getPosterUrl(props.movie, 'w342'))
+const posterSrcSet = computed(() => getPosterSrcSet(props.movie))
 const backdropUrl = computed(() => getBackdropUrl(props.movie, 'w780'))
+const backdropSrcSet = computed(() => getBackdropSrcSet(props.movie))
 const coverGradient = computed(() => getMovieCoverGradient(props.movie))
 const isInCart = computed(() => cart.isInCart(props.movie.id))
 
@@ -58,8 +62,16 @@ const handlePosterError = () => {
   posterError.value = true
 }
 
+const handlePosterLoad = () => {
+  posterLoaded.value = true
+}
+
 const handleBackdropError = () => {
   backdropError.value = true
+}
+
+const handleBackdropLoad = () => {
+  backdropLoaded.value = true
 }
 
 // Format TMDB rating if available
@@ -81,9 +93,17 @@ const tmdbRatingDisplay = computed(() => {
             <div class="modal-cover" :style="{ background: coverGradient }">
               <img 
                 v-if="showBackdrop"
-                :src="backdropUrl" 
+                :src="backdropUrl"
+                :srcset="backdropSrcSet"
+                sizes="(max-width: 480px) 300px, 780px"
                 :alt="movie.title" 
                 class="modal-backdrop"
+                :class="{ 'loaded': backdropLoaded }"
+                loading="lazy"
+                decoding="async"
+                width="780"
+                height="439"
+                @load="handleBackdropLoad"
                 @error="handleBackdropError"
               />
               <!-- Fallback when no backdrop - show gradient with title -->
@@ -100,9 +120,17 @@ const tmdbRatingDisplay = computed(() => {
             <div class="modal-poster-container">
               <img 
                 v-if="showPoster"
-                :src="posterUrl" 
+                :src="posterUrl"
+                :srcset="posterSrcSet"
+                sizes="(max-width: 480px) 100px, 120px"
                 :alt="movie.title" 
                 class="modal-poster"
+                :class="{ 'loaded': posterLoaded }"
+                loading="lazy"
+                decoding="async"
+                width="342"
+                height="513"
+                @load="handlePosterLoad"
                 @error="handlePosterError"
               />
               <div v-else class="modal-poster-fallback">
@@ -157,6 +185,12 @@ const tmdbRatingDisplay = computed(() => {
   height: 100%;
   object-fit: cover;
   object-position: center;
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.modal-backdrop.loaded {
+  opacity: 1;
 }
 
 .modal-backdrop-fallback {
@@ -206,6 +240,12 @@ const tmdbRatingDisplay = computed(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.modal-poster.loaded {
+  opacity: 1;
 }
 
 .modal-poster-fallback {
