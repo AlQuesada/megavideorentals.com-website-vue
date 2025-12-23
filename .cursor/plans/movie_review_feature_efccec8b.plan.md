@@ -245,5 +245,3 @@ Modify [src/App.vue](src/App.vue):
 2. If not logged in, show MemberLoginModal
 3. On login success, submit rentals to Supabase
 4. Show CheckoutModal success
-
----
